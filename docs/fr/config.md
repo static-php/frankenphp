@@ -53,7 +53,7 @@ En option, le nombre de threads à créer et les [workers](worker.md) à démarr
         num_threads <num_threads> # Définit le nombre de threads PHP à démarrer. Par défaut : 2x le nombre de CPUs disponibles.
         max_threads <num_threads> # Limite le nombre de threads PHP supplémentaires qui peuvent être démarrés au moment de l'exécution. Valeur par défaut : num_threads. Peut être mis à 'auto'.
 		max_wait_time <duration> # Définit le temps maximum pendant lequel une requête peut attendre un thread PHP libre avant d'être interrompue. Valeur par défaut : désactivé.
-        php_ini <key> <value> Définit une directive php.ini. Peut être utilisé plusieurs fois pour définir plusieurs directives.   
+        php_ini <key> <value> Définit une directive php.ini. Peut être utilisé plusieurs fois pour définir plusieurs directives.
         worker {
             file <path> # Définit le chemin vers le script worker.
             num <num> # Définit le nombre de threads PHP à démarrer, par défaut 2x le nombre de CPUs disponibles.
@@ -90,12 +90,12 @@ Vous pouvez aussi définir plusieurs workers si vous servez plusieurs applicatio
 }
 
 app.example.com {
-    root * /path/to/app/public
+    root /path/to/app/public
     php_server
 }
 
 other.example.com {
-    root * /path/to/other/public
+    root /path/to/other/public
     php_server
 }
 
@@ -180,10 +180,10 @@ où le processus FrankenPHP a été lancé. Vous pouvez également spécifier un
 }
 ```
 
-* Le motif `**` signifie une surveillance récursive.
-* Les répertoires peuvent également être relatifs (depuis l'endroit où le processus FrankenPHP est démarré).
-* Si vous avez défini plusieurs workers, ils seront tous redémarrés lorsqu'un fichier est modifié.
-* Méfiez-vous des fichiers créés au moment de l'exécution (comme les logs) car ils peuvent provoquer des redémarrages intempestifs du worker.
+- Le motif `**` signifie une surveillance récursive.
+- Les répertoires peuvent également être relatifs (depuis l'endroit où le processus FrankenPHP est démarré).
+- Si vous avez défini plusieurs workers, ils seront tous redémarrés lorsqu'un fichier est modifié.
+- Méfiez-vous des fichiers créés au moment de l'exécution (comme les logs) car ils peuvent provoquer des redémarrages intempestifs du worker.
 
 La surveillance des fichiers est basé sur [e-dant/watcher](https://github.com/e-dant/watcher).
 
@@ -219,9 +219,9 @@ Vous trouverez plus d'informations sur ce paramètre dans la [documentation Cadd
 
 Les variables d'environnement suivantes peuvent être utilisées pour insérer des directives Caddy dans le `Caddyfile` sans le modifier :
 
-* `SERVER_NAME` : change [les adresses sur lesquelles écouter](https://caddyserver.com/docs/caddyfile/concepts#addresses), les noms d'hôte fournis seront également utilisés pour le certificat TLS généré
-* `CADDY_GLOBAL_OPTIONS` : injecte [des options globales](https://caddyserver.com/docs/caddyfile/options)
-* `FRANKENPHP_CONFIG` : insère la configuration sous la directive `frankenphp`
+- `SERVER_NAME` : change [les adresses sur lesquelles écouter](https://caddyserver.com/docs/caddyfile/concepts#addresses), les noms d'hôte fournis seront également utilisés pour le certificat TLS généré
+- `CADDY_GLOBAL_OPTIONS` : injecte [des options globales](https://caddyserver.com/docs/caddyfile/options)
+- `FRANKENPHP_CONFIG` : insère la configuration sous la directive `frankenphp`
 
 Comme pour les SAPI FPM et CLI, les variables d'environnement ne sont exposées par défaut dans la superglobale `$_SERVER`.
 
