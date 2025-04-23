@@ -497,7 +497,7 @@ func (f *FrankenPHPModule) ServeHTTP(w http.ResponseWriter, r *http.Request, _ c
 	// handle the request with a module worker
 	workerName := ""
 	for _, w := range f.Workers {
-		fullPath := documentRoot + r.URL.Path
+		fullPath := documentRoot + "/" + r.URL.Path
 		if fullPath == w.FileName {
 			workerName = w.Name
 		}
