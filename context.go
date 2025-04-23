@@ -23,7 +23,7 @@ type frankenPHPContext struct {
 	pathInfo       string
 	scriptName     string
 	scriptFilename string
-	workerName     string
+	worker         *worker
 
 	// Whether the request is already closed by us
 	isDone bool
@@ -40,8 +40,8 @@ func fromContext(ctx context.Context) (fctx *frankenPHPContext, ok bool) {
 	return
 }
 
-// NewFrankenPHPContext parses out the correct filename and context to pass to NewRequestWithExistingContext
-func NewFrankenPHPContext(r *http.Request, opts ...RequestOption) (string, *frankenPHPContext, error) {
+// NewRequestWithContext creates a new FrankenPHP request context.
+func NewRequestWithContext(r *http.Request, opts ...RequestOption) (*http.Request, error) {
 	fc := &frankenPHPContext{
 		done:      make(chan interface{}),
 		startedAt: time.Now(),
@@ -49,7 +49,7 @@ func NewFrankenPHPContext(r *http.Request, opts ...RequestOption) (string, *fran
 	}
 	for _, o := range opts {
 		if err := o(fc); err != nil {
-			return "", nil, err
+			return nil, err
 		}
 	}
 
@@ -63,7 +63,7 @@ func NewFrankenPHPContext(r *http.Request, opts ...RequestOption) (string, *fran
 		} else {
 			var err error
 			if fc.documentRoot, err = os.Getwd(); err != nil {
-				return "", nil, err
+				return nil, err
 			}
 		}
 	}
@@ -92,24 +92,15 @@ func NewFrankenPHPContext(r *http.Request, opts ...RequestOption) (string, *fran
 
 	// SCRIPT_FILENAME is the absolute path of SCRIPT_NAME
 	fc.scriptFilename = sanitizedPathJoin(fc.documentRoot, fc.scriptName)
-	return fc.scriptFilename, fc, nil
-}
 
-// NewRequestWithExistingContext wraps an http request with an existing FrankenPHP request context.
-func NewRequestWithExistingContext(r *http.Request, fc *frankenPHPContext) *http.Request {
-	c := context.WithValue(r.Context(), contextKey, fc)
-
-	return r.WithContext(c)
-}
-
-// NewRequestWithContext creates a new FrankenPHP request context.
-func NewRequestWithContext(r *http.Request, opts ...RequestOption) (*http.Request, error) {
-	_, fc, err2 := NewFrankenPHPContext(r, opts...)
-	if err2 != nil {
-		return nil, err2
+	// assign a worker to the context by path if none is assigned yet
+	if fc.worker == nil {
+		fc.worker = getWorkerByFileName(fc.scriptFilename)
 	}
 
-	return NewRequestWithExistingContext(r, fc), nil
+	c := context.WithValue(r.Context(), contextKey, fc)
+
+	return r.WithContext(c), nil
 }
 
 func newDummyContext(requestPath string, opts ...RequestOption) (*frankenPHPContext, error) {

@@ -14,22 +14,23 @@ import (
 
 // represents a worker script and can have many threads assigned to it
 type worker struct {
-	name        string
-	fileName    string
-	num         int
-	env         PreparedEnv
-	requestChan chan *frankenPHPContext
-	threads     []*phpThread
-	threadMutex sync.RWMutex
+	name           string
+	fileName       string
+	num            int
+	env            PreparedEnv
+	requestChan    chan *frankenPHPContext
+	threads        []*phpThread
+	threadMutex    sync.RWMutex
+	isModuleWorker bool
 }
 
 var (
-	workers          map[string]*worker
+	workers          []*worker
 	watcherIsEnabled bool
 )
 
 func initWorkers(opt []workerOpt) error {
-	workers = make(map[string]*worker, len(opt))
+	workers = make([]*worker, 0)
 	workersReady := sync.WaitGroup{}
 	directoriesToWatch := getDirectoriesToWatch(opt)
 	watcherIsEnabled = len(directoriesToWatch) > 0
@@ -39,9 +40,8 @@ func initWorkers(opt []workerOpt) error {
 		if err != nil {
 			return err
 		}
-		if worker.threads == nil {
-			worker.threads = make([]*phpThread, 0, o.num)
-		}
+		workers = append(workers, worker)
+
 		workersReady.Add(o.num)
 		for i := 0; i < o.num; i++ {
 			thread := getInactivePHPThread()
@@ -67,12 +67,22 @@ func initWorkers(opt []workerOpt) error {
 	return nil
 }
 
-func getWorkerKey(name string, filename string) string {
-	key := filename
-	if strings.HasPrefix(name, "m#") {
-		key = name
+func getWorkerByFileName(fileName string) *worker {
+	for _, w := range workers {
+		if w.fileName == fileName && !w.isModuleWorker {
+			return w
+		}
 	}
-	return key
+	return nil
+}
+
+func getWorkerByName(name string) *worker {
+	for _, w := range workers {
+		if w.name == name {
+			return w
+		}
+	}
+	return nil
 }
 
 func newWorker(o workerOpt) (*worker, error) {
@@ -81,24 +91,24 @@ func newWorker(o workerOpt) (*worker, error) {
 		return nil, fmt.Errorf("worker filename is invalid %q: %w", o.fileName, err)
 	}
 
-	key := getWorkerKey(o.name, absFileName)
-	if wrk, ok := workers[key]; ok {
-		return wrk, nil
-	}
-
 	if o.env == nil {
 		o.env = make(PreparedEnv, 1)
 	}
 
 	o.env["FRANKENPHP_WORKER\x00"] = "1"
 	w := &worker{
-		name:        o.name,
-		fileName:    absFileName,
-		num:         o.num,
-		env:         o.env,
-		requestChan: make(chan *frankenPHPContext),
+		name:           o.name,
+		fileName:       absFileName,
+		num:            o.num,
+		env:            o.env,
+		requestChan:    make(chan *frankenPHPContext),
+		threads:        make([]*phpThread, 0, o.num),
+		isModuleWorker: strings.HasPrefix(o.name, "m#"),
 	}
-	workers[key] = w
+
+	if getWorkerByName(o.name) != nil {
+		return nil, fmt.Errorf("2 workers may not have the same name: %q", o.name)
+	}
 
 	return w, nil
 }
