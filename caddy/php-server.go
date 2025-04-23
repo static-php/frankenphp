@@ -98,6 +98,8 @@ func cmdPHPServer(fs caddycmd.Flags) (int, error) {
 		workersOption[0].Watch = watch
 	}
 
+	workerConfigs = workersOption
+
 	if frankenphp.EmbeddedAppPath != "" {
 		if _, err := os.Stat(filepath.Join(frankenphp.EmbeddedAppPath, "php.ini")); err == nil {
 			iniScanDir := os.Getenv("PHP_INI_SCAN_DIR")
@@ -326,7 +328,7 @@ func cmdPHPServer(fs caddycmd.Flags) (int, error) {
 		},
 		AppsRaw: caddy.ModuleMap{
 			"http":       caddyconfig.JSON(httpApp, nil),
-			"frankenphp": caddyconfig.JSON(FrankenPHPApp{Workers: workersOption}, nil),
+			"frankenphp": caddyconfig.JSON(FrankenPHPApp{}, nil),
 		},
 	}
 

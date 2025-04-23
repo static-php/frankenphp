@@ -1,15 +1,16 @@
-﻿package caddy
+package caddy
 
 import (
 	"testing"
 
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
+	"github.com/dunglas/frankenphp/internal/fastabs"
 	"github.com/stretchr/testify/require"
 )
 
 // resetModuleWorkers resets the moduleWorkers slice for testing
 func resetModuleWorkers() {
-	moduleWorkers = make([]workerConfig, 0)
+	workerConfigs = []workerConfig{}
 }
 
 func TestModuleWorkerDuplicateFilenamesFail(t *testing.T) {
@@ -41,54 +42,6 @@ func TestModuleWorkerDuplicateFilenamesFail(t *testing.T) {
 	resetModuleWorkers()
 }
 
-func TestModuleWorkersDuplicateNameWithDifferentEnvironmentsFail(t *testing.T) {
-	// Create a test configuration with a worker name
-	configWithWorkerName1 := `
-	{
-		php_server {
-			env APP_ENV something
-			worker {
-				name test-worker
-				file ../testdata/worker-with-env.php
-				num 1
-			}
-		}
-	}`
-
-	// Parse the first configuration
-	d1 := caddyfile.NewTestDispenser(configWithWorkerName1)
-	module1 := &FrankenPHPModule{}
-
-	// Unmarshal the first configuration
-	err := module1.UnmarshalCaddyfile(d1)
-	require.NoError(t, err, "First module should be configured without errors")
-
-	// Create a second test configuration with the same worker name
-	configWithWorkerName2 := `
-	{
-		php_server {
-			worker {
-				env APP_ENV mismatch
-				name test-worker
-				file ../testdata/worker-with-env.php
-				num 1
-			}
-		}
-	}`
-
-	// Parse the second configuration
-	d2 := caddyfile.NewTestDispenser(configWithWorkerName2)
-	module2 := &FrankenPHPModule{}
-
-	// Unmarshal the second configuration
-	err = module2.UnmarshalCaddyfile(d2)
-
-	// Verify that an error was returned
-	require.Error(t, err, "Expected an error when two workers have the same name, but different environments")
-	require.Contains(t, err.Error(), "module workers with different environments must not have duplicate names", "Error message should mention duplicate names")
-	resetModuleWorkers()
-}
-
 func TestModuleWorkersWithDifferentFilenames(t *testing.T) {
 	// Create a test configuration with different worker filenames
 	configWithDifferentFilenames := `
@@ -109,10 +62,13 @@ func TestModuleWorkersWithDifferentFilenames(t *testing.T) {
 	// Verify that no error was returned
 	require.NoError(t, err, "Expected no error when two workers in the same module have different filenames")
 
+	worker1ExpectedFileName := absFilename("../testdata/worker-with-env.php")
+	worker2ExpectedFileName := absFilename("../testdata/worker-with-counter.php")
+
 	// Verify that both workers were added to the module
 	require.Len(t, module.Workers, 2, "Expected two workers to be added to the module")
-	require.Equal(t, "../testdata/worker-with-env.php", module.Workers[0].FileName, "First worker should have the correct filename")
-	require.Equal(t, "../testdata/worker-with-counter.php", module.Workers[1].FileName, "Second worker should have the correct filename")
+	require.Equal(t, worker1ExpectedFileName, module.Workers[0].FileName, "First worker should have the correct filename")
+	require.Equal(t, worker2ExpectedFileName, module.Workers[1].FileName, "Second worker should have the correct filename")
 
 	resetModuleWorkers()
 }
@@ -161,9 +117,9 @@ func TestModuleWorkersDifferentNamesSucceed(t *testing.T) {
 	require.NoError(t, err, "Expected no error when two workers have different names")
 
 	// Verify that both workers were added to moduleWorkers
-	require.Len(t, moduleWorkers, 2, "Expected two workers to be added to moduleWorkers")
-	require.Equal(t, "m#test-worker-1", moduleWorkers[0].Name, "First worker should have the correct name")
-	require.Equal(t, "m#test-worker-2", moduleWorkers[1].Name, "Second worker should have the correct name")
+	require.Len(t, workerConfigs, 2, "Expected two workers to be added to moduleWorkers")
+	require.Equal(t, "test-worker-1", workerConfigs[0].Name, "First worker should have the correct name")
+	require.Equal(t, "test-worker-2", workerConfigs[1].Name, "Second worker should have the correct name")
 
 	resetModuleWorkers()
 }
@@ -194,7 +150,12 @@ func TestModuleWorkerWithEnvironmentVariables(t *testing.T) {
 
 	// Verify that the worker was added to the module
 	require.Len(t, module.Workers, 1, "Expected one worker to be added to the module")
-	require.Equal(t, "../testdata/worker-with-env.php", module.Workers[0].FileName, "Worker should have the correct filename")
+	require.Equal(
+		t,
+		absFilename("../testdata/worker-with-env.php"),
+		module.Workers[0].FileName,
+		"Worker should have the correct filename",
+	)
 
 	// Verify that the environment variables were set correctly
 	require.Len(t, module.Workers[0].Env, 2, "Expected two environment variables")
@@ -231,7 +192,7 @@ func TestModuleWorkerWithWatchConfiguration(t *testing.T) {
 
 	// Verify that the worker was added to the module
 	require.Len(t, module.Workers, 1, "Expected one worker to be added to the module")
-	require.Equal(t, "../testdata/worker-with-env.php", module.Workers[0].FileName, "Worker should have the correct filename")
+	require.Equal(t, absFilename("../testdata/worker-with-env.php"), module.Workers[0].FileName, "Worker should have the correct filename")
 
 	// Verify that the watch directories were set correctly
 	require.Len(t, module.Workers[0].Watch, 3, "Expected three watch patterns")
@@ -267,10 +228,15 @@ func TestModuleWorkerWithCustomName(t *testing.T) {
 
 	// Verify that the worker was added to the module
 	require.Len(t, module.Workers, 1, "Expected one worker to be added to the module")
-	require.Equal(t, "../testdata/worker-with-env.php", module.Workers[0].FileName, "Worker should have the correct filename")
+	require.Equal(t, absFilename("../testdata/worker-with-env.php"), module.Workers[0].FileName, "Worker should have the correct filename")
 
 	// Verify that the worker was added to moduleWorkers with the m# prefix
-	require.Equal(t, "m#custom-worker-name", module.Workers[0].Name, "Worker should have the custom name")
+	require.Equal(t, "custom-worker-name", module.Workers[0].Name, "Worker should have the custom name")
 
 	resetModuleWorkers()
+}
+
+func absFilename(filename string) string {
+	absFilename, _ := fastabs.FastAbs(filename)
+	return absFilename
 }

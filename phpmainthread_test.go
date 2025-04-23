@@ -32,7 +32,6 @@ func TestStartAndStopTheMainThreadWithOneInactiveThread(t *testing.T) {
 }
 
 func TestTransitionRegularThreadToWorkerThread(t *testing.T) {
-	workers = nil
 	logger = zap.NewNop()
 	_, err := initPHPThreads(1, 1, nil)
 	assert.NoError(t, err)
@@ -57,7 +56,6 @@ func TestTransitionRegularThreadToWorkerThread(t *testing.T) {
 }
 
 func TestTransitionAThreadBetween2DifferentWorkers(t *testing.T) {
-	workers = nil
 	logger = zap.NewNop()
 	_, err := initPHPThreads(1, 1, nil)
 	assert.NoError(t, err)
@@ -158,7 +156,6 @@ func TestAllCommonHeadersAreCorrect(t *testing.T) {
 	}
 }
 func TestFinishBootingAWorkerScript(t *testing.T) {
-	workers = nil
 	logger = zap.NewNop()
 	_, err := initPHPThreads(1, 1, nil)
 	assert.NoError(t, err)
@@ -181,9 +178,6 @@ func TestFinishBootingAWorkerScript(t *testing.T) {
 }
 
 func getDummyWorker(fileName string) *worker {
-	if workers == nil {
-		workers = make(map[string]*worker)
-	}
 	worker, _ := newWorker(workerOpt{
 		fileName: testDataPath + "/" + fileName,
 		num:      1,
@@ -214,9 +208,9 @@ func allPossibleTransitions(worker1Path string, worker2Path string) []func(*phpT
 				thread.boot()
 			}
 		},
-		func(thread *phpThread) { convertToWorkerThread(thread, workers[worker1Path]) },
+		func(thread *phpThread) { convertToWorkerThread(thread, getWorkerByFileName(worker1Path)) },
 		convertToInactiveThread,
-		func(thread *phpThread) { convertToWorkerThread(thread, workers[worker2Path]) },
+		func(thread *phpThread) { convertToWorkerThread(thread, getWorkerByFileName(worker2Path)) },
 		convertToInactiveThread,
 	}
 }

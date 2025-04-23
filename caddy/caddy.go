@@ -32,7 +32,7 @@ const defaultDocumentRoot = "public"
 var iniError = errors.New("'php_ini' must be in the format: php_ini \"<key>\" \"<value>\"")
 
 // FrankenPHPModule instances register their workers and FrankenPHPApp reads them at Start() time
-var moduleWorkers = make([]workerConfig, 0)
+var workerConfigs = []workerConfig{}
 
 func init() {
 	caddy.RegisterModule(FrankenPHPApp{})
@@ -72,9 +72,8 @@ type FrankenPHPApp struct {
 	PhpIni map[string]string `json:"php_ini,omitempty"`
 	// The maximum amount of time a request may be stalled waiting for a thread
 	MaxWaitTime time.Duration `json:"max_wait_time,omitempty"`
-
-	metrics frankenphp.Metrics
-	logger  *zap.Logger
+	metrics     frankenphp.Metrics
+	logger      *zap.Logger
 }
 
 // CaddyModule returns the Caddy module information.
@@ -113,7 +112,7 @@ func (f *FrankenPHPApp) Start() error {
 		frankenphp.WithMaxWaitTime(f.MaxWaitTime),
 	}
 	// Add workers from FrankenPHPApp and FrankenPHPModule configurations
-	for _, w := range append(f.Workers, moduleWorkers...) {
+	for _, w := range workerConfigs {
 		opts = append(opts, frankenphp.WithWorkers(w.Name, repl.ReplaceKnown(w.FileName, ""), w.Num, w.Env, w.Watch))
 	}
 
@@ -136,10 +135,9 @@ func (f *FrankenPHPApp) Stop() error {
 	}
 
 	// reset the configuration so it doesn't bleed into later tests
-	f.Workers = nil
 	f.NumThreads = 0
 	f.MaxWaitTime = 0
-	moduleWorkers = nil
+	workerConfigs = []workerConfig{}
 
 	return nil
 }
@@ -217,6 +215,17 @@ func parseWorkerConfig(d *caddyfile.Dispenser) (workerConfig, error) {
 		return wc, errors.New(`the "file" argument must be specified`)
 	}
 
+	// ensure the filename is absolute for unique names
+	absFileName, err := fastabs.FastAbs(wc.FileName)
+	if err != nil {
+		return wc, fmt.Errorf("worker filename is invalid %q: %w", d.Val(), err)
+	}
+	wc.FileName = absFileName
+
+	if wc.Name == "" {
+		wc.Name = getUniqueWorkerName(wc)
+	}
+
 	if frankenphp.EmbeddedAppPath != "" && filepath.IsLocal(wc.FileName) {
 		wc.FileName = filepath.Join(frankenphp.EmbeddedAppPath, wc.FileName)
 	}
@@ -224,8 +233,34 @@ func parseWorkerConfig(d *caddyfile.Dispenser) (workerConfig, error) {
 	return wc, nil
 }
 
+func getUniqueWorkerName(wc workerConfig) string {
+	if wc.Name != "" {
+		return wc.Name
+	}
+
+	automaticName := wc.FileName
+	i := 0
+	for {
+		nameExists := false
+		for i := 0; i < len(workerConfigs); i++ {
+			if workerConfigs[i].Name == automaticName {
+				nameExists = true
+				break
+			}
+		}
+		if !nameExists {
+			break
+		}
+		i++
+		automaticName = fmt.Sprintf("%s_%d", wc.FileName, i)
+	}
+
+	return automaticName
+}
+
 // UnmarshalCaddyfile implements caddyfile.Unmarshaler.
 func (f *FrankenPHPApp) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
+	workerConfigs = []workerConfig{}
 	for d.Next() {
 		for d.NextBlock(0) {
 			// when adding a new directive, also update the allowedDirectives error message
@@ -309,15 +344,15 @@ func (f *FrankenPHPApp) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if err != nil {
 					return err
 				}
-				if wc.Name == "" {
-					// let worker initialization validate if the FileName is valid or not
-					name, _ := fastabs.FastAbs(wc.FileName)
-					if name == "" {
-						name = wc.FileName
+
+				// check for duplicate workers
+				for _, existingWorker := range f.Workers {
+					if existingWorker.FileName == wc.FileName {
+						return fmt.Errorf("workers must not have duplicate filenames: %s", wc.FileName)
 					}
-					wc.Name = name
 				}
 
+				workerConfigs = append(workerConfigs, wc)
 				f.Workers = append(f.Workers, wc)
 			default:
 				allowedDirectives := "num_threads, max_threads, php_ini, worker, max_wait_time"
@@ -356,8 +391,7 @@ type FrankenPHPModule struct {
 	// Env sets an extra environment variable to the given value. Can be specified more than once for multiple environment variables.
 	Env map[string]string `json:"env,omitempty"`
 	// Workers configures the worker scripts to start.
-	Workers []workerConfig `json:"workers,omitempty"`
-
+	Workers                     []workerConfig `json:"workers,omitempty"`
 	resolvedDocumentRoot        string
 	preparedEnv                 frankenphp.PreparedEnv
 	preparedEnvNeedsReplacement bool
@@ -443,10 +477,13 @@ func (f *FrankenPHPModule) ServeHTTP(w http.ResponseWriter, r *http.Request, _ c
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 
 	var documentRootOption frankenphp.RequestOption
+	var documentRoot string
 	if f.resolvedDocumentRoot == "" {
-		documentRootOption = frankenphp.WithRequestDocumentRoot(repl.ReplaceKnown(f.Root, ""), *f.ResolveRootSymlink)
+		documentRoot = repl.ReplaceKnown(f.Root, "")
+		documentRootOption = frankenphp.WithRequestDocumentRoot(documentRoot, *f.ResolveRootSymlink)
 	} else {
-		documentRootOption = frankenphp.WithRequestResolvedDocumentRoot(f.resolvedDocumentRoot)
+		documentRoot = f.resolvedDocumentRoot
+		documentRootOption = frankenphp.WithRequestResolvedDocumentRoot(documentRoot)
 	}
 
 	env := f.preparedEnv
@@ -457,30 +494,26 @@ func (f *FrankenPHPModule) ServeHTTP(w http.ResponseWriter, r *http.Request, _ c
 		}
 	}
 
-	filename, fc, err := frankenphp.NewFrankenPHPContext(
+	// handle the request with a module worker
+	workerName := ""
+	for _, w := range f.Workers {
+		fullPath := documentRoot + r.URL.Path
+		if fullPath == w.FileName {
+			workerName = w.Name
+		}
+	}
+
+	fr, err := frankenphp.NewRequestWithContext(
 		r,
 		documentRootOption,
 		frankenphp.WithRequestSplitPath(f.SplitPath),
 		frankenphp.WithRequestPreparedEnv(env),
 		frankenphp.WithOriginalRequest(&origReq),
+		frankenphp.WithWorker(workerName),
 	)
 	if err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
-
-	workerName := ""
-	for _, w := range f.Workers {
-		if p, _ := fastabs.FastAbs(w.FileName); p == filename {
-			workerName = w.Name
-		}
-	}
-
-	err = frankenphp.WithModuleWorker(workerName)(fc)
-	if err != nil {
-		return caddyhttp.Error(http.StatusInternalServerError, err)
-	}
-
-	fr := frankenphp.NewRequestWithExistingContext(r, fc)
 
 	if err = frankenphp.ServeHTTP(w, fr); err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError, err)
@@ -557,93 +590,22 @@ func (f *FrankenPHPModule) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				f.ResolveRootSymlink = &v
 
 			case "worker":
-				for d.NextBlock(1) {
-				}
-				for d.NextArg() {
-				}
-				// Skip "worker" blocks in the first pass
-				continue
-
-			default:
-				allowedDirectives := "root, split, env, resolve_root_symlink, worker"
-				return wrongSubDirectiveError("php or php_server", allowedDirectives, d.Val())
-			}
-		}
-	}
-
-	// Second pass: Parse only "worker" blocks
-	d.Reset()
-	for d.Next() {
-		for d.NextBlock(0) {
-			if d.Val() == "worker" {
 				wc, err := parseWorkerConfig(d)
 				if err != nil {
 					return err
 				}
-
-				// Inherit environment variables from the parent php_server directive
-				if !filepath.IsAbs(wc.FileName) && f.Root != "" {
-					wc.FileName = filepath.Join(f.Root, wc.FileName)
-				}
-
-				if f.Env != nil {
-					if wc.Env == nil {
-						wc.Env = make(map[string]string)
-					}
-					for k, v := range f.Env {
-						// Only set if not already defined in the worker
-						if _, exists := wc.Env[k]; !exists {
-							wc.Env[k] = v
-						}
-					}
-				}
-
-				envString := getEnvString(wc.Env)
-
-				if wc.Name == "" {
-					if len(wc.Env) > 0 {
-						// Environment is required in order not to collide with other FrankenPHPModules
-						wc.Name += "env:" + envString
-					}
-					// Filename is required to avoid collisions with other workers in this module
-					wc.Name += "_" + wc.FileName
-				}
-				if !strings.HasPrefix(wc.Name, "m#") {
-					wc.Name = "m#" + wc.Name
-				}
-
-				// Check if a worker with this filename already exists in this module
+				// check for duplicate workers
 				for _, existingWorker := range f.Workers {
 					if existingWorker.FileName == wc.FileName {
 						return fmt.Errorf("workers must not have duplicate filenames: %s", wc.FileName)
 					}
 				}
-				// Check if a worker with this name and a different environment or filename already exists
-				for i, existingWorker := range moduleWorkers {
-					if existingWorker.Name == wc.Name {
-						efs, _ := fastabs.FastAbs(existingWorker.FileName)
-						wcfs, _ := fastabs.FastAbs(wc.FileName)
-						if efs != wcfs {
-							return fmt.Errorf("module workers with different filenames must not have duplicate names: %s", wc.Name)
-						}
-						if len(existingWorker.Env) != len(wc.Env) {
-							// If lengths are different, the maps are definitely different
-							return fmt.Errorf("module workers with different environments must not have duplicate names: %s", wc.Name)
-						}
-						// If lengths are the same, iterate and compare key-value pairs
-						if getEnvString(existingWorker.Env) != envString {
-							return fmt.Errorf("module workers with different environments must not have duplicate names: %s", wc.Name)
-						}
-						// If we reach this point, the maps are equal.
-						// Increase the number of threads for this worker and skip adding it to the moduleWorkers again
-						moduleWorkers[i].Num += wc.Num
-						f.Workers = append(f.Workers, wc)
-						return nil
-					}
-				}
-
 				f.Workers = append(f.Workers, wc)
-				moduleWorkers = append(moduleWorkers, wc)
+				workerConfigs = append(workerConfigs, wc)
+
+			default:
+				allowedDirectives := "root, split, env, resolve_root_symlink, worker"
+				return wrongSubDirectiveError("php or php_server", allowedDirectives, d.Val())
 			}
 		}
 	}

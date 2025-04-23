@@ -4,7 +4,6 @@ package frankenphp
 import "C"
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,12 +23,12 @@ type worker struct {
 }
 
 var (
-	workers          map[string]*worker
+	workers          []*worker
 	watcherIsEnabled bool
 )
 
 func initWorkers(opt []workerOpt) error {
-	workers = make(map[string]*worker, len(opt))
+	workers = make([]*worker, 0)
 	workersReady := sync.WaitGroup{}
 	directoriesToWatch := getDirectoriesToWatch(opt)
 	watcherIsEnabled = len(directoriesToWatch) > 0
@@ -39,9 +38,8 @@ func initWorkers(opt []workerOpt) error {
 		if err != nil {
 			return err
 		}
-		if worker.threads == nil {
-			worker.threads = make([]*phpThread, 0, o.num)
-		}
+		workers = append(workers, worker)
+
 		workersReady.Add(o.num)
 		for i := 0; i < o.num; i++ {
 			thread := getInactivePHPThread()
@@ -67,23 +65,28 @@ func initWorkers(opt []workerOpt) error {
 	return nil
 }
 
-func getWorkerKey(name string, filename string) string {
-	key := filename
-	if strings.HasPrefix(name, "m#") {
-		key = name
+func getWorkerByFileName(fileName string) *worker {
+	for _, w := range workers {
+		if w.fileName == fileName {
+			return w
+		}
 	}
-	return key
+	return nil
+}
+
+func getWorkerByName(name string) *worker {
+	for _, w := range workers {
+		if w.name == name {
+			return w
+		}
+	}
+	return nil
 }
 
 func newWorker(o workerOpt) (*worker, error) {
 	absFileName, err := fastabs.FastAbs(o.fileName)
 	if err != nil {
 		return nil, fmt.Errorf("worker filename is invalid %q: %w", o.fileName, err)
-	}
-
-	key := getWorkerKey(o.name, absFileName)
-	if wrk, ok := workers[key]; ok {
-		return wrk, nil
 	}
 
 	if o.env == nil {
@@ -97,8 +100,12 @@ func newWorker(o workerOpt) (*worker, error) {
 		num:         o.num,
 		env:         o.env,
 		requestChan: make(chan *frankenPHPContext),
+		threads:     make([]*phpThread, 0, o.num),
 	}
-	workers[key] = w
+
+	if getWorkerByName(o.name) != nil {
+		return nil, fmt.Errorf("2 workers may not have the same name: %q", o.name)
+	}
 
 	return w, nil
 }

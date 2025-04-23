@@ -124,10 +124,13 @@ func WithRequestLogger(logger *zap.Logger) RequestOption {
 	}
 }
 
-// WithModuleWorker sets the worker that should handle the request
-func WithModuleWorker(name string) RequestOption {
+// WithWorker sets the worker that should handle the request
+func WithWorker(name string) RequestOption {
 	return func(o *frankenPHPContext) error {
-		o.workerName = name
+		if name == "" {
+			return nil
+		}
+		o.worker = getWorkerByName(name)
 
 		return nil
 	}
