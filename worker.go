@@ -10,8 +10,6 @@ import (
 
 	"github.com/dunglas/frankenphp/internal/fastabs"
 	"github.com/dunglas/frankenphp/internal/watcher"
-
-	"go.uber.org/zap"
 )
 
 // represents a worker script and can have many threads assigned to it
