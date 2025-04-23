@@ -4,6 +4,7 @@ package frankenphp
 import "C"
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,13 +14,14 @@ import (
 
 // represents a worker script and can have many threads assigned to it
 type worker struct {
-	name        string
-	fileName    string
-	num         int
-	env         PreparedEnv
-	requestChan chan *frankenPHPContext
-	threads     []*phpThread
-	threadMutex sync.RWMutex
+	name           string
+	fileName       string
+	num            int
+	env            PreparedEnv
+	requestChan    chan *frankenPHPContext
+	threads        []*phpThread
+	threadMutex    sync.RWMutex
+	isModuleWorker bool
 }
 
 var (
@@ -67,7 +69,7 @@ func initWorkers(opt []workerOpt) error {
 
 func getWorkerByFileName(fileName string) *worker {
 	for _, w := range workers {
-		if w.fileName == fileName {
+		if w.fileName == fileName && !w.isModuleWorker {
 			return w
 		}
 	}
@@ -95,12 +97,13 @@ func newWorker(o workerOpt) (*worker, error) {
 
 	o.env["FRANKENPHP_WORKER\x00"] = "1"
 	w := &worker{
-		name:        o.name,
-		fileName:    absFileName,
-		num:         o.num,
-		env:         o.env,
-		requestChan: make(chan *frankenPHPContext),
-		threads:     make([]*phpThread, 0, o.num),
+		name:           o.name,
+		fileName:       absFileName,
+		num:            o.num,
+		env:            o.env,
+		requestChan:    make(chan *frankenPHPContext),
+		threads:        make([]*phpThread, 0, o.num),
+		isModuleWorker: strings.HasPrefix(o.fileName, "m#"),
 	}
 
 	if getWorkerByName(o.name) != nil {

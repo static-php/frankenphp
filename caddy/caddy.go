@@ -591,6 +591,7 @@ func (f *FrankenPHPModule) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
 			case "worker":
 				wc, err := parseWorkerConfig(d)
+				wc.Name = "m#" + wc.Name
 				if err != nil {
 					return err
 				}
