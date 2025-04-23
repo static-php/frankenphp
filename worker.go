@@ -10,6 +10,8 @@ import (
 
 	"github.com/dunglas/frankenphp/internal/fastabs"
 	"github.com/dunglas/frankenphp/internal/watcher"
+
+	"go.uber.org/zap"
 )
 
 // represents a worker script and can have many threads assigned to it
@@ -103,7 +105,7 @@ func newWorker(o workerOpt) (*worker, error) {
 		env:            o.env,
 		requestChan:    make(chan *frankenPHPContext),
 		threads:        make([]*phpThread, 0, o.num),
-		isModuleWorker: strings.HasPrefix(o.fileName, "m#"),
+		isModuleWorker: strings.HasPrefix(o.name, "m#"),
 	}
 
 	if getWorkerByName(o.name) != nil {
