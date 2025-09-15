@@ -82,7 +82,7 @@ func goArray(arr unsafe.Pointer, ordered bool) (map[string]any, []string) {
 			v := C.get_ht_packed_data(hashTable, i)
 			if v != nil && C.zval_get_type(v) != C.IS_UNDEF {
 				strIndex := strconv.Itoa(int(i))
-				entries[strIndex] = GoValue(v)
+				entries[strIndex] = goValue(v)
 				if ordered {
 					order = append(order, strIndex)
 				}
@@ -98,7 +98,7 @@ func goArray(arr unsafe.Pointer, ordered bool) (map[string]any, []string) {
 			continue
 		}
 
-		v := GoValue(&bucket.val)
+		v := goValue(&bucket.val)
 
 		if bucket.key != nil {
 			keyStr := GoString(unsafe.Pointer(bucket.key))
@@ -141,7 +141,7 @@ func GoPackedArray(arr unsafe.Pointer) []any {
 		for i := C.uint32_t(0); i < nNumUsed; i++ {
 			v := C.get_ht_packed_data(hashTable, i)
 			if v != nil && C.zval_get_type(v) != C.IS_UNDEF {
-				result = append(result, GoValue(v))
+				result = append(result, goValue(v))
 			}
 		}
 
@@ -152,7 +152,7 @@ func GoPackedArray(arr unsafe.Pointer) []any {
 	for i := C.uint32_t(0); i < nNumUsed; i++ {
 		bucket := C.get_ht_bucket_data(hashTable, i)
 		if bucket != nil && C.zval_get_type(&bucket.val) != C.IS_UNDEF {
-			result = append(result, GoValue(&bucket.val))
+			result = append(result, goValue(&bucket.val))
 		}
 	}
 
@@ -176,13 +176,13 @@ func phpArray(entries map[string]any, order []string) unsafe.Pointer {
 		zendArray = createNewArray((uint32)(len(order)))
 		for _, key := range order {
 			val := entries[key]
-			zval := PHPValue(val)
+			zval := phpValue(val)
 			C.zend_hash_str_update(zendArray, toUnsafeChar(key), C.size_t(len(key)), zval)
 		}
 	} else {
 		zendArray = createNewArray((uint32)(len(entries)))
 		for key, val := range entries {
-			zval := PHPValue(val)
+			zval := phpValue(val)
 			C.zend_hash_str_update(zendArray, toUnsafeChar(key), C.size_t(len(key)), zval)
 		}
 	}
@@ -197,7 +197,7 @@ func phpArray(entries map[string]any, order []string) unsafe.Pointer {
 func PHPPackedArray(slice []any) unsafe.Pointer {
 	zendArray := createNewArray((uint32)(len(slice)))
 	for _, val := range slice {
-		zval := PHPValue(val)
+		zval := phpValue(val)
 		C.zend_hash_next_index_insert(zendArray, zval)
 	}
 
@@ -208,7 +208,11 @@ func PHPPackedArray(slice []any) unsafe.Pointer {
 }
 
 // EXPERIMENTAL: GoValue converts a PHP zval to a Go value
-func GoValue(zval *C.zval) any {
+func GoValue(zval unsafe.Pointer) any {
+	return goValue((*C.zval)(zval))
+}
+
+func goValue(zval *C.zval) any {
 	t := C.zval_get_type(zval)
 
 	switch t {
@@ -251,8 +255,12 @@ func GoValue(zval *C.zval) any {
 	}
 }
 
-// PHPValue converts a Go any to a PHP zval
-func PHPValue(value any) *C.zval {
+// EXPERIMENTAL: PHPValue converts a Go any to a PHP zval
+func PHPValue(value any) unsafe.Pointer {
+	return unsafe.Pointer(phpValue(value))
+}
+
+func phpValue(value any) *C.zval {
 	var zval C.zval
 
 	switch v := value.(type) {
